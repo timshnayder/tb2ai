@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tb2-ai-ingress
+  namespace: tb2ai
+spec:
+  ingressClassName: cloudflare-tunnel
+  rules:
+  - host: tb2ai.shnayder.ca
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: tb2-ai-service
+            port:
+              number: 8000

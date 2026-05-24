@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TB2 Problem Generator</title>
+  
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
+  
+  <!-- Custom Sizing and Styles -->
+  <link rel="stylesheet" href="{{url_for('static', filename='css/aiDashboard.css')}}">
+</head>
+
+<body>
+  <div class="app-container d-flex flex-column justify-content-between p-3">
+    <!-- Header -->
+    <header class="app-header d-flex justify-content-between align-items-center mb-3 pb-2">
+      <h1 class="brand-title m-0">TB2 Problem Generator</h1>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="row justify-content-center align-items-stretch px-md-2 flex-grow-1 g-3 main-row">
+      
+      <!-- Control Panel -->
+      <div class="col-lg-4 col-xl-3 d-flex flex-column gap-3">
+        <div class="control-panel p-3 d-flex flex-column justify-content-between h-100">
+          <div>
+            <h2 class="section-title mb-3">Generator Settings</h2>
+
+            <!-- Layout Version Toggle -->
+            <div class="mb-3">
+              <label class="control-label mb-2">Layout</label>
+              <div class="layout-toggle-group">
+                <button type="button" class="layout-btn active" id="btn-layout-spray" data-layout="11">
+                  Spray Board
+                </button>
+                <button type="button" class="layout-btn" id="btn-layout-mirror" data-layout="10">
+                  Mirror Board
+                </button>
+              </div>
+            </div>
+
+            <!-- Size Selector -->
+            <div class="mb-3">
+              <label class="control-label mb-2">Size</label>
+              <select class="form-select size-select" id="select-size">
+                <option value="8" selected>12x8</option>
+                <option value="9">10x8</option>
+                <option value="6">12x12</option>
+                <option value="7">10x12</option>
+                <option value="10">12x16</option>
+              </select>
+            </div>
+
+            <!-- Grade Slider -->
+            <div class="mb-3">
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <label class="control-label">Grade</label>
+                <span class="slider-val" id="grade-display">V5</span>
+              </div>
+              <input type="range" class="form-range custom-slider" id="grade-slider" min="0" max="15" value="5">
+              <div class="d-flex justify-content-between custom-ticks mt-1">
+                <span>V0</span>
+                <span>V5</span>
+                <span>V10</span>
+                <span>V15</span>
+              </div>
+            </div>
+
+            <!-- Temperature Slider -->
+            <div class="mb-3">
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <label class="control-label">Creativity</label>
+                <span class="slider-val" id="temp-display">Standard (0.7)</span>
+              </div>
+              <input type="range" class="form-range custom-slider" id="temp-slider" min="1" max="3" value="2" step="1">
+              <div class="d-flex justify-content-between custom-ticks mt-1">
+                <span>Precise</span>
+                <span>Standard</span>
+                <span>Creative</span>
+              </div>
+            </div>
+
+            <!-- Angle Slider -->
+            <div class="mb-3">
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <label class="control-label">Angle</label>
+                <span class="slider-val" id="angle-display">40°</span>
+              </div>
+              <input type="range" class="form-range custom-slider" id="angle-slider" min="0" max="65" value="40" step="5">
+              <div class="d-flex justify-content-between custom-ticks mt-1">
+                <span>0°</span>
+                <span>65°</span>
+              </div>
+            </div>
+
+            <!-- No Matching Switch -->
+            <div class="mb-3 form-check form-switch custom-switch-container">
+              <input class="form-check-input custom-switch" type="checkbox" role="switch" id="switch-nomatch" checked>
+              <label class="form-check-label control-label ms-2" for="switch-nomatch">No Matching Holds</label>
+            </div>
+          </div>
+
+          <!-- Generate CTA -->
+          <div class="d-grid mt-2">
+            <button type="button" id="btn-generate" class="btn btn-generate">
+              Generate Climb
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Board Area -->
+      <div class="col-lg-8 col-xl-6 d-flex flex-column">
+        <div class="board-card p-3 d-flex flex-column align-items-center justify-content-center position-relative h-100">
+          
+          <!-- AI Thinker Loading State Overlay -->
+          <div id="ai-thinker" class="ai-thinker-overlay d-none">
+            <div class="spinner-container">
+              <div class="spinner-border text-dark" role="status">
+                <span class="visually-hidden">Loading...</span>
+              </div>
+            </div>
+            <h3 class="loading-title">Generating Climb</h3>
+            <p class="loading-subtitle" id="thinking-step">Computing movement path...</p>
+          </div>
+
+          <!-- Board SVG visualization -->
+          <div class="svg-board-container" id="board-container">
+            <svg id="svg-climb" viewBox="0 0 0 0" xmlns="http://www.w3.org/2000/svg" class="w-100 h-100"></svg>
+          </div>
+          
+        </div>
+      </div>
+
+      <!-- Climb Info Sidebar -->
+      <div class="col-lg-12 col-xl-3 d-flex flex-column gap-3">
+        <div class="climb-profile-panel p-3 d-flex flex-column justify-content-between h-100">
+          <div>
+            <h2 class="section-title mb-4">Climb Profile</h2>
+            
+            <!-- Climb Specs -->
+            <div class="climb-specs p-3 mb-4">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <span class="spec-label">Grade</span>
+                <span class="spec-val" id="climb-grade">-</span>
+              </div>
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <span class="spec-label">Angle</span>
+                <span class="spec-val" id="climb-angle">-</span>
+              </div>
+              <div class="d-flex justify-content-between align-items-center">
+                <span class="spec-label">No Matching</span>
+                <span class="spec-val" id="climb-nomatch">-</span>
+              </div>
+            </div>
+            
+            <!-- Color Roles Legend -->
+            <div class="color-legend p-3 mb-4">
+              <h4 class="legend-title mb-3">Hold Rules</h4>
+              <div class="legend-grid">
+                <div class="legend-item"><span class="dot bg-success-dot"></span><span>Start holds</span></div>
+                <div class="legend-item"><span class="dot bg-primary-dot"></span><span>Hand/Foot</span></div>
+                <div class="legend-item"><span class="dot bg-danger-dot"></span><span>Finish holds</span></div>
+                <div class="legend-item"><span class="dot bg-warning-dot"></span><span>Foot-only</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="d-flex flex-column gap-2">
+            <!-- Mirror button (hidden/disabled on Spray by JS) -->
+            <button id="button-mirror" class="btn btn-mirror" type="button">
+              Mirror Climb
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- Bootstrapping configs from backend -->
+  <script>
+    const configs = {{ configs | tojson }};
+  </script>
+
+  <!-- Common libraries -->
+  <script src="{{url_for('static', filename='js/common.js')}}"></script>
+  
+  <!-- Interactive Dashboard controller -->
+  <script src="{{url_for('static', filename='js/aiDashboard.js')}}"></script>
+</body>
+
+</html>

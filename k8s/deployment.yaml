@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tb2-ai-deployment
+  namespace: tb2ai
+  labels:
+    app: tb2-ai
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: tb2-ai
+  template:
+    metadata:
+      labels:
+        app: tb2-ai
+    spec:
+      containers:
+      - name: web-app
+        # If building directly inside Minikube's docker daemon, use: tb2-ai:latest
+        # If pushing to a registry, use: your-registry-username/tb2-ai:latest
+        image: timshn/tb2ai:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1500m"
+        env:
+        - name: FLASK_ENV
+          value: "production"

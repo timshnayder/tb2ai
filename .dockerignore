@@ -1,0 +1,24 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local virtual environment
+.venv/
+venv/
+env/
+ENV/
+
+# Development database / temporary SQLite files
+# *.db
+# *.db-journal
+
+# PyTorch checkpoints and training outputs (keep models, ignore active training runs)
+modeltraining/conditional_climb_ai_*_training.pth
+modeltraining/extract_climbs.py
+modeltraining/model.py
+
+# Git & local config
+.git/
+.gitignore
+.vscode/
