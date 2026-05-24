@@ -19,7 +19,7 @@ spec:
       - name: web-app
         # If building directly inside Minikube's docker daemon, use: tb2-ai:latest
         # If pushing to a registry, use: your-registry-username/tb2-ai:latest
-        image: timshn/tb2ai:latest
+        image: timshn/tb2ai:1.0
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000
