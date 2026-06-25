@@ -1,6 +1,5 @@
 import os
 import json
-import sqlite3
 import random
 import torch
 import torch.nn as nn
@@ -367,13 +366,7 @@ def generate_new_climb(inputGrade, temperature, maxLen=20, target_layout_id=11, 
     print(f'ai_generated_string = "{visualizer_ready_string}"\n')
 
     return {
-        "grade": inputGrade,
-        "raw_frames": visualizer_ready_string,
-        "frames": visualizer_ready_string,
-        "layout_id": target_layout_id,
-        "size_id": size_id,
-        "angle": angle,
-        "is_nomatch": is_nomatch
+        "frames": visualizer_ready_string
     }
 
 # Flask integration wrapper function

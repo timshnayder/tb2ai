@@ -200,6 +200,7 @@ body {
 
 .btn-generate:hover {
   background: #333333;
+  color: #dddddd
 }
 
 .btn-generate:active {

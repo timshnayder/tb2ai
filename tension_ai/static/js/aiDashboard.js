@@ -2,7 +2,7 @@
 let currentLayoutId = 11; // Default to Spray L11
 let currentSizeId = 8; // Default size 12x8
 let currentGradeValue = 5; // Default slider value
-let currentTempValue = 0.7; // Default temperature
+let currentTempValue = 1.5; // Default temperature
 let currentAngleValue = 40; // Default angle
 let currentNoMatchValue = true; // Default no match
 
@@ -40,11 +40,6 @@ const indexToGradeMap = [
   "V0", "V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9", "V10", "V11", "V12", "V13", "V14", "V15"
 ];
 
-const tempMapping = {
-  1: { text: "Precise (0.4)", val: 0.4 },
-  2: { text: "Standard (0.7)", val: 0.7 },
-  3: { text: "Creative (1.0)", val: 1.0 }
-};
 
 // Mappings for instant client-side hold translation between layouts
 const placementToCoordMap11 = {};
@@ -79,7 +74,7 @@ function initializeDashboard() {
   sizeSelect.addEventListener("change", (e) => {
     currentSizeId = parseInt(e.target.value);
     renderBoard(currentLayoutId);
-    
+
     // Clear active climb immediately
     currentClimb.raw_frames = "";
     currentClimb.frames = "";
@@ -95,10 +90,9 @@ function initializeDashboard() {
 
   // Temperature slider
   tempSlider.addEventListener("input", (e) => {
-    const val = parseInt(e.target.value);
-    const mapping = tempMapping[val];
-    currentTempValue = mapping.val;
-    tempDisplay.textContent = mapping.text;
+    const val = parseFloat(e.target.value);
+    currentTempValue = val;
+    tempDisplay.textContent = val.toFixed(1);
   });
 
   // Angle slider
@@ -148,7 +142,7 @@ function translateFrames11To10(framesString11) {
   for (const hold of holds) {
     if (!hold) continue;
     const [placementId11, colorId] = hold.split("r");
-    
+
     // Find the physical coordinate of this hold
     const coordKey = placementToCoordMap11[placementId11];
     if (coordKey) {
@@ -324,8 +318,17 @@ function generateClimb() {
       is_nomatch: currentNoMatchValue
     })
   })
-    .then((res) => {
-      if (!res.ok) throw new Error("Inference error");
+    .then(async (res) => {
+      if (!res.ok) {
+        let errMsg = "Failed to reach generative engine. Make sure python server is running correctly.";
+        try {
+          const errData = await res.json();
+          if (errData && errData.description) {
+            errMsg = errData.description;
+          }
+        } catch (e) { }
+        throw new Error(errMsg);
+      }
       return res.json();
     })
     .then((data) => {
@@ -339,18 +342,18 @@ function generateClimb() {
 
       // Update state
       currentClimb = {
-        grade: data.grade,
+        grade: targetGrade,
         frames: data.frames,
-        raw_frames: data.raw_frames
+        raw_frames: data.frames
       };
 
       isMirrored = false;
       btnMirrorToggle.classList.remove("active");
 
       // Update UI if elements exist
-      if (climbGradeEl) climbGradeEl.textContent = data.grade;
-      if (climbAngleEl) climbAngleEl.textContent = `${data.angle}°`;
-      if (climbNoMatchEl) climbNoMatchEl.textContent = data.is_nomatch ? "Yes" : "No";
+      if (climbGradeEl) climbGradeEl.textContent = targetGrade;
+      if (climbAngleEl) climbAngleEl.textContent = `${currentAngleValue}°`;
+      if (climbNoMatchEl) climbNoMatchEl.textContent = currentNoMatchValue ? "Yes" : "No";
 
       // Draw the climb holds on the board
       highlightClimb(data.frames);
@@ -359,6 +362,6 @@ function generateClimb() {
       clearInterval(statusInterval);
       aiThinker.classList.add("d-none");
       console.error(err);
-      alert("Failed to reach generative engine. Make sure python server is running correctly.");
+      alert(err.message);
     });
 }

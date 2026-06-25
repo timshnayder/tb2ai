@@ -2,11 +2,46 @@ import flask
 import logging
 import tension_ai.generator
 
+import time
+from collections import defaultdict
+
 blueprint = flask.Blueprint("api", __name__)
+
+# In-memory storage for request timestamps by IP
+_rate_limit_records = defaultdict(list)
+
+def get_client_ip():
+    cf_ip = flask.request.headers.get("CF-Connecting-IP")
+    if cf_ip:
+        return cf_ip
+    forwarded = flask.request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return flask.request.remote_addr
+
+def is_rate_limited(ip, limit=10, period=60):
+    now = time.time()
+    # Filter out timestamps older than the tracking period
+    timestamps = [t for t in _rate_limit_records[ip] if now - t < period]
+    _rate_limit_records[ip] = timestamps
+    
+    if len(timestamps) >= limit:
+        return True
+    
+    _rate_limit_records[ip].append(now)
+    return False
 
 
 @blueprint.route("/api/v1/generate", methods=["POST"])
 def api_generate():
+    # Enforce rate limit (max 10 requests per 60 seconds per IP)
+    ip = get_client_ip()
+    if is_rate_limited(ip, limit=10, period=60):
+        return flask.jsonify({
+            "error": True,
+            "description": "Too many requests. Please wait before generating more climbs."
+        }), 429
+
     try:
         req_data = flask.request.get_json() or {}
         layout_id = int(req_data.get("layout_id", 11))
