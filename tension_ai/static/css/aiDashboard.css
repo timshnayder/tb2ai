@@ -417,3 +417,64 @@ svg#svg-climb circle[stroke="#f97316"] {
 .custom-switch {
   cursor: pointer;
 }
+
+/* =======================================================
+   4. MOBILE & TABLET RESPONSIVENESS
+   ======================================================= */
+@media (max-width: 991.98px) {
+  html,
+  body {
+    height: auto;
+    max-height: none;
+    overflow-y: auto; /* Allow natural vertical scrolling */
+    overflow-x: hidden;
+  }
+
+  .app-container {
+    height: auto;
+    max-height: none;
+    padding: 10px !important;
+  }
+
+  .main-row {
+    height: auto;
+    max-height: none;
+  }
+
+  .main-row > div {
+    height: auto !important; /* Stack columns naturally */
+  }
+
+  .control-panel,
+  .board-card,
+  .climb-profile-panel {
+    height: auto !important;
+    min-height: auto;
+    margin-bottom: 8px; /* Add spacing between stacked panels */
+  }
+
+  /* Make the climbing board large, centered, and easily visible */
+  .board-card {
+    padding: 12px;
+  }
+
+  .svg-board-container {
+    height: 70vh; /* Scale based on viewport height */
+    min-height: 380px;
+    max-height: 600px;
+    width: 100%;
+    margin: 10px 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  svg#svg-climb {
+    width: 100%;
+    height: 100%;
+  }
+
+  .brand-title {
+    font-size: 1.2rem; /* Compact header on mobile */
+  }
+}

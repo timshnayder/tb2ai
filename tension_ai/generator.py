@@ -154,8 +154,40 @@ def init_generator():
         raise e
 
 # =======================================================
-# 3. GENERATION FUNCTION WITH GUARDRAILS (USER'S EXACT LOGIC)
+# 3. UTILITY AND GENERATION FUNCTIONS WITH SAMPLING & GUARDRAILS
 # =======================================================
+
+def top_k_top_p_filtering(logits, top_k=0, top_p=0.0, filter_value=-float('Inf')):
+    """ Filter a distribution of logits using top-k and/or nucleus (top-p) filtering.
+        Args:
+            logits: logits distribution shape (vocabulary size)
+            top_k > 0: keep only top k tokens with highest probability (top-k filtering).
+            top_p > 0.0: keep the top tokens with cumulative probability >= top_p (nucleus filtering).
+    """
+    assert logits.dim() == 1
+    
+    if top_k > 0:
+        top_k = min(top_k, logits.size(-1))
+        indices_to_remove = logits < torch.topk(logits, top_k)[0][..., -1, None]
+        logits[indices_to_remove] = filter_value
+
+    if top_p > 0.0:
+        sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+        cumulative_probs = torch.cumsum(torch.softmax(sorted_logits, dim=-1), dim=-1)
+
+        # Remove tokens with cumulative probability above the threshold
+        sorted_indices_to_remove = cumulative_probs > top_p
+        # Shift the indices to the right to keep also the first token above the threshold
+        sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+        sorted_indices_to_remove[..., 0] = 0
+
+        # Replace deleted tokens indices with their original indices
+        indices_to_remove = sorted_indices[sorted_indices_to_remove]
+        logits[indices_to_remove] = filter_value
+        
+    return logits
+
+
 def generate_new_climb(inputGrade, temperature, maxLen=20, target_layout_id=11, size_id=8, angle=40, is_nomatch=False, beam_width=4):
     # Select active vocabulary, reverse vocabulary, and model based on target_layout_id (10 is Mirror, 11 is Spray)
     if target_layout_id == 10:
@@ -186,53 +218,45 @@ def generate_new_climb(inputGrade, temperature, maxLen=20, target_layout_id=11, 
     except Exception as e:
         logger.error(f"Error loading valid placements from JSON metadata: {str(e)}")
 
-    print(f"\nGenerating a {inputGrade} climb with Beam Search (Width: {beam_width}, Angle: {angle}°, No-Match: {is_nomatch}) for board size {size_id}...")
+    # We use beam_width to generate multiple independent candidate climbs and select the best one
+    num_candidates = max(1, beam_width)
+    print(f"\nGenerating {num_candidates} candidate climbs with Top-P/Top-K Sampling (Temp: {temperature}, Angle: {angle}°, No-Match: {is_nomatch}) for board size {size_id}...")
     print("-" * 55)
 
-    # Initialize beam search candidates starting with [START]
-    candidates = [{
-        "sequence": [active_vocab["[START]"]],
-        "log_prob": 0.0,
-        "start_holds_placed": 0,
-        "finish_holds_placed": 0
-    }]
-    
     completed_climbs = []
 
-    for step in range(maxLen):
-        if not candidates:
-            break
+    for cand_idx in range(num_candidates):
+        sequence = [active_vocab["[START]"]]
+        start_holds_placed = 0
+        finish_holds_placed = 0
+        total_log_prob = 0.0
+        
+        for step in range(maxLen):
+            seq_len = len(sequence)
+            pad_len = 46 - seq_len
+            padded_seq = ([0] * pad_len if pad_len > 0 else []) + sequence
             
-        holds_batch = []
-        for cand in candidates:
-            seq = cand["sequence"]
-            pad_len = 46 - len(seq)
-            padded_seq = ([0] * pad_len if pad_len > 0 else []) + seq
-            holds_batch.append(padded_seq)
-
-        input_holds = torch.tensor(holds_batch, dtype=torch.long).to(device)
-        input_grade = torch.tensor([gradeValue] * len(candidates), dtype=torch.long).to(device)
-        input_angle = torch.tensor([angle_val] * len(candidates), dtype=torch.long).to(device)
-        input_no_match = torch.tensor([no_match_val] * len(candidates), dtype=torch.float32).to(device)
-
-        with torch.no_grad():
-            logits = active_model(input_holds, input_grade, input_angle, input_no_match)
-
-        logits = logits / temperature
-        log_probs_batch = torch.log_softmax(logits, dim=-1).cpu().numpy()
-
-        all_expansions = []
-        for c_idx, cand in enumerate(candidates):
-            log_probs = log_probs_batch[c_idx].copy()
-            start_holds_placed = cand["start_holds_placed"]
-            finish_holds_placed = cand["finish_holds_placed"]
-
-            # Apply guardrails
-            for i in range(len(log_probs)):
+            input_holds = torch.tensor([padded_seq], dtype=torch.long).to(device)
+            input_grade = torch.tensor([gradeValue], dtype=torch.long).to(device)
+            input_angle = torch.tensor([angle_val], dtype=torch.long).to(device)
+            input_no_match = torch.tensor([no_match_val], dtype=torch.float32).to(device)
+            
+            with torch.no_grad():
+                logits = active_model(input_holds, input_grade, input_angle, input_no_match)
+                
+            # Extract logits for batch 0
+            logits = logits[0]
+            
+            # Scale logits by temperature (prevent division by zero)
+            temp = max(0.01, temperature)
+            logits = logits / temp
+            
+            # Apply guardrails as logit masks
+            for i in range(len(logits)):
                 token_str = active_reverse_vocab.get(i, "")
-                #pad or start
+                # Pad or start tokens are not allowed to be predicted
                 if i == 0 or i == 1:
-                    log_probs[i] = -float('inf')
+                    logits[i] = -float('inf')
                     continue
                 
                 # Guardrail: Limit choices to holds that fit inside the selected board size
@@ -241,105 +265,83 @@ def generate_new_climb(inputGrade, temperature, maxLen=20, target_layout_id=11, 
                         placement_str = token_str.split('r')[0].replace('p', '')
                         placement_id = int(placement_str)
                         if placement_id not in valid_placements:
-                            log_probs[i] = -float('inf')
+                            logits[i] = -float('inf')
                             continue
                     except ValueError:
                         pass
 
-                # max 2 start holds allowed 
+                # Max 2 start holds allowed
                 if "r5" in token_str and start_holds_placed >= 2:
-                    log_probs[i] = -float('inf')
+                    logits[i] = -float('inf')
                     continue
 
-                # do not allow the climb to end if no start holds or no finish holds are placed yet
+                # Do not allow the climb to end if no start holds or no finish holds are placed yet
                 if i == active_vocab["[END]"]:
                     if start_holds_placed == 0 or finish_holds_placed == 0:
-                        log_probs[i] = -float('inf')
+                        logits[i] = -float('inf')
                         continue
 
-                # if we are running out of steps and have no finish holds, force a finish hold
+                # If we are running out of steps and have no finish holds, force a finish hold
                 if finish_holds_placed == 0 and step >= maxLen - 2:
                     if not ("r7" in token_str):
-                        log_probs[i] = -float('inf')
+                        logits[i] = -float('inf')
                         continue
 
-                # if we have 1 finish hold, the next move MUST be the [END] token, OR a second finish hold.
+                # If we have 1 finish hold, the next move MUST be the [END] token, OR a second finish hold
                 if finish_holds_placed == 1:
-                    
                     if not (i == active_vocab["[END]"] or "r7" in token_str):
-                        log_probs[i] = -float('inf')
+                        logits[i] = -float('inf')
                         continue
-                # if we already have 2 finish holds, the climb is over.
+                
+                # If we already have 2 finish holds, the climb is over
                 if finish_holds_placed >= 2:
-                    
                     if i != active_vocab["[END]"]:
-                        log_probs[i] = -float('inf')
+                        logits[i] = -float('inf')
                         continue
-
-            # To introduce diversity in bouldering options (so clicking Generate doesn't return the identical climb every time),
-            # we can add a tiny random noise to log_probs, OR select expansions using a mixture of probability and randomness.
-            # Adding a tiny amount of Gumbel noise to log_probs is a mathematically standard way to do stochastic beam search!
-            # Gumbel noise = -log(-log(uniform(0, 1)))
-            # Scale of noise = 0.1 * temperature (smaller noise means more deterministic, larger means more creative)
-            if temperature > 0:
-                gumbel_noise = -np.log(-np.log(np.random.uniform(1e-10, 1.0, size=len(log_probs))))
-                log_probs_adjusted = log_probs + temperature * gumbel_noise
-            else:
-                log_probs_adjusted = log_probs
-
-            # now time for beam search 
-            # get the top K indices for this candidate
-            top_k_indices = np.argsort(log_probs_adjusted)[-beam_width:]
             
-            for idx in top_k_indices:
-                val = log_probs[idx]
-                if val == -float('inf'):
-                    continue
-                
-                next_token_str = active_reverse_vocab.get(idx, "")
-                next_start = start_holds_placed + (1 if "r5" in next_token_str else 0)
-                next_finish = finish_holds_placed + (1 if "r7" in next_token_str else 0)
-                
-                new_cand = {
-                    "sequence": cand["sequence"] + [idx],
-                    "log_prob": cand["log_prob"] + val,
-                    "start_holds_placed": next_start,
-                    "finish_holds_placed": next_finish
-                }
-                all_expansions.append(new_cand)
-
-        if not all_expansions:
-            break
-
-        # Sort all expansions by their accumulated log probability
-        all_expansions = sorted(all_expansions, key=lambda x: x["log_prob"], reverse=True)
-        
-        # Select the top beam_width expansions
-        next_candidates = []
-        for cand in all_expansions:
-            if len(next_candidates) >= beam_width:
-                break
-                
-            last_token = cand["sequence"][-1]
-            if last_token == active_vocab["[END]"]:
-                completed_climbs.append(cand)
+            # Apply Top-K = 50 and Top-P = 0.95 filtering
+            # This filters out the tail of noise and restricts sampling to the cumulative 95% nucleus
+            logits = top_k_top_p_filtering(logits, top_k=50, top_p=0.95)
+            
+            # Calculate probabilities
+            probs = torch.softmax(logits, dim=-1)
+            
+            # Check if all valid probabilities are zero
+            if torch.isnan(probs).any() or probs.sum() == 0:
+                next_token_id = active_vocab["[END]"]
             else:
-                next_candidates.append(cand)
+                next_token_id = torch.multinomial(probs, num_samples=1).item()
+            
+            # Track log probability of the choice
+            choice_prob = probs[next_token_id].item()
+            choice_log_prob = np.log(max(1e-10, choice_prob))
+            total_log_prob += choice_log_prob
+            
+            # Update state
+            sequence.append(next_token_id)
+            next_token_str = active_reverse_vocab.get(next_token_id, "")
+            if "r5" in next_token_str:
+                start_holds_placed += 1
+            if "r7" in next_token_str:
+                finish_holds_placed += 1
                 
-        candidates = next_candidates
+            if next_token_id == active_vocab["[END]"]:
+                break
+        
+        # Ensure sequence ends with [END] if it didn't complete
+        if sequence[-1] != active_vocab["[END]"]:
+            sequence.append(active_vocab["[END]"])
+            
+        completed_climbs.append({
+            "sequence": sequence,
+            "log_prob": total_log_prob,
+            "length": len(sequence)
+        })
 
-    # Choose the best climb from completed ones, or fallback to the best active candidate
-    best_climb = None
-    if completed_climbs:
-        completed_climbs = sorted(completed_climbs, key=lambda x: x["log_prob"], reverse=True)
-        best_climb = completed_climbs[0]["sequence"]
-        print(f"-> Selected best completed climb with log-prob: {completed_climbs[0]['log_prob']:.4f}")
-    elif candidates:
-        best_climb = candidates[0]["sequence"]
-        print(f"-> Fallback: Selected best active climb with log-prob: {candidates[0]['log_prob']:.4f}")
-    else:
-        best_climb = [active_vocab["[START]"]]
-        print("-> Warning: Generation bottlenecked completely.")
+    # Choose the best climb from completed candidates based on overall log probability
+    completed_climbs = sorted(completed_climbs, key=lambda x: x["log_prob"], reverse=True)
+    best_climb = completed_climbs[0]["sequence"]
+    print(f"-> Selected best candidate climb with log-prob: {completed_climbs[0]['log_prob']:.4f}")
 
     # Remove [START] and [END] from output string
     generated_tokens_list = []
